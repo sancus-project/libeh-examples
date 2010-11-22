@@ -10,11 +10,15 @@ AM_INIT_AUTOMAKE([foreign -Wall -Werror])
 AC_CONFIG_MACRO_DIR([m4])
 
 LT_INIT
+CWARNFLAGS="-Wall -Wextra -Winline -pedantic"
+AC_SUBST(CWARNFLAGS)
 
 # Checks for programs.
 AC_PROG_CC_C99
 
 # Checks for libraries.
+PKG_CHECK_MODULES(LIBEH, [eh])
+AC_SUBST(LIBEH)
 
 # Checks for header files.
 
