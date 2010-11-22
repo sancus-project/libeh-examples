@@ -12,14 +12,14 @@
 #include <assert.h>
 #include <stdlib.h>
 
-static void echo_conn_on_close(struct eh_connection *);
+static void echo_on_conn_close(struct eh_connection *);
 
 /*
  * data
  */
 static struct ev_signal sig[2];
 static struct eh_connection_cb echo_connection_callbacks = {
-	.on_close = echo_conn_on_close,
+	.on_close = echo_on_conn_close,
 };
 
 /*
@@ -49,7 +49,7 @@ static inline void echo_free(struct echo_conn *self)
 /*
  * eh_connection callbacks
  */
-static void echo_conn_on_close(struct eh_connection *conn)
+static void echo_on_conn_close(struct eh_connection *conn)
 {
 	struct echo_conn *self = (struct echo_conn *)conn;
 
