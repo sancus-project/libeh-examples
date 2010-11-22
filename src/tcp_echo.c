@@ -6,12 +6,83 @@
 
 #include <eh.h>		/* UNUSED() */
 #include <eh_watcher.h>	/* eh_signal_init() */
+#include <eh_socket.h>	/* eh_socket_ntop() */
 #include <eh_log.h>	/* debugf(), syserrf() */
 
 #include <assert.h>
+#include <stdlib.h>
 
+static void echo_conn_on_close(struct eh_connection *);
+
+/*
+ * data
+ */
 static struct ev_signal sig[2];
+static struct eh_connection_cb echo_connection_callbacks = {
+	.on_close = echo_conn_on_close,
+};
 
+/*
+ * helpers
+ */
+static struct echo_conn *echo_new(int fd)
+{
+	struct echo_conn *self = malloc(sizeof(*self));
+	if (self) {
+		struct eh_connection *conn = &self->conn;
+		memset(self, '\0', sizeof(*self));
+
+		eh_connection_init(conn, fd,
+				   self->read_buffer, sizeof(self->read_buffer),
+				   self->write_buffer, sizeof(self->write_buffer));
+
+		conn->cb = &echo_connection_callbacks;
+	}
+	return self;
+}
+
+static inline void echo_free(struct echo_conn *self)
+{
+	free(self);
+}
+
+/*
+ * eh_connection callbacks
+ */
+static void echo_conn_on_close(struct eh_connection *conn)
+{
+	struct echo_conn *self = (struct echo_conn *)conn;
+
+	debugf("%s: closed", self->name);
+	echo_free(self);
+}
+
+/*
+ * eh_server callbacks
+ */
+
+static struct eh_connection *echo_on_connect(struct eh_server *UNUSED(server), int fd,
+					     struct sockaddr *sa, socklen_t sa_len)
+{
+	struct echo_conn *self = echo_new(fd);
+	if (self == NULL) {
+		syserrf("echo_new(%d)", fd);
+	} else if (eh_socket_ntop(self->name, sizeof(self->name), sa, sa_len) < 0) {
+		syserr("eh_socket_ntop");
+		echo_free(self);
+	} else {
+		/* happy case */
+		debugf("%s: connected via fd %d", self->name, fd);
+
+		return &self->conn;
+	}
+
+	return NULL;
+}
+
+/*
+ * higher level functions
+ */
 static int echo_init(struct echo_server *self, const char *addr, unsigned port)
 {
 	struct eh_server *server = &self->server;
@@ -28,6 +99,7 @@ static int echo_init(struct echo_server *self, const char *addr, unsigned port)
 		return -1;
 	}
 
+	server->on_connect = echo_on_connect;
 	return 1;
 }
 
