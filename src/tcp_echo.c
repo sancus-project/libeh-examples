@@ -12,14 +12,18 @@
 #include <assert.h>
 #include <stdlib.h>
 
+static void echo_on_conn_read(struct eh_connection *, unsigned char *, size_t);
 static void echo_on_conn_close(struct eh_connection *);
+static bool echo_on_conn_error(struct eh_connection *, enum eh_connection_error);
 
 /*
  * data
  */
 static struct ev_signal sig[2];
 static struct eh_connection_cb echo_connection_callbacks = {
+	.on_read = echo_on_conn_read,
 	.on_close = echo_on_conn_close,
+	.on_error = echo_on_conn_error,
 };
 
 /*
@@ -55,6 +59,36 @@ static void echo_on_conn_close(struct eh_connection *conn)
 
 	debugf("%s: closed", self->name);
 	echo_free(self);
+}
+
+static bool echo_on_conn_error(struct eh_connection *conn, enum eh_connection_error error)
+{
+	struct echo_conn *self = (struct echo_conn *)conn;
+
+	switch (error) {
+	case EH_CONNECTION_READ_ERROR:
+		syserrf("%s: read()", self->name); break;
+	case EH_CONNECTION_WRITE_ERROR:
+		syserrf("%s: write()", self->name); break;
+	case EH_CONNECTION_READ_FULL:
+		errf("%s: read buffer is full", self->name); break;
+	case EH_CONNECTION_WRITE_FULL:
+		errf("%s: write buffer is full", self->name); break;
+	case EH_CONNECTION_READ_WATCHER_ERROR:
+		errf("%s: read watcher failed", self->name); break;
+	case EH_CONNECTION_WRITE_WATCHER_ERROR:
+		errf("%s: write watcher failed", self->name); break;
+	}
+	return true; /* close connection */
+}
+
+static void echo_on_conn_read(struct eh_connection *conn, unsigned char *buffer,
+			      size_t len)
+{
+	struct echo_conn *self = (struct echo_conn *)conn;
+
+	debugf("%s: read buffer at %p has %zu bytes", self->name, buffer, len);
+	eh_connection_write(conn, buffer, len);
 }
 
 /*
@@ -100,6 +134,8 @@ static int echo_init(struct echo_server *self, const char *addr, unsigned port)
 	}
 
 	server->on_connect = echo_on_connect;
+	/* server->on_stop = echo_on_server_stop */
+	/* server->on_error = echo_on_server_error; */
 	return 1;
 }
 
