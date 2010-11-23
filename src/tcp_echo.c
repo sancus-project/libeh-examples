@@ -12,7 +12,7 @@
 #include <assert.h>
 #include <stdlib.h>
 
-static void echo_on_conn_read(struct eh_connection *, unsigned char *, size_t);
+static ssize_t echo_on_conn_read(struct eh_connection *, unsigned char *, size_t);
 static void echo_on_conn_close(struct eh_connection *);
 static bool echo_on_conn_error(struct eh_connection *, enum eh_connection_error);
 
@@ -82,13 +82,16 @@ static bool echo_on_conn_error(struct eh_connection *conn, enum eh_connection_er
 	return true; /* close connection */
 }
 
-static void echo_on_conn_read(struct eh_connection *conn, unsigned char *buffer,
+static ssize_t echo_on_conn_read(struct eh_connection *conn, unsigned char *buffer,
 			      size_t len)
 {
 	struct echo_conn *self = (struct echo_conn *)conn;
 
 	debugf("%s: read buffer at %p has %zu bytes", self->name, buffer, len);
-	eh_connection_write(conn, buffer, len);
+	if (eh_connection_write(conn, buffer, len) < 0)
+		return -1;
+
+	return len;
 }
 
 /*
