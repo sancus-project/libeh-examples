@@ -168,14 +168,11 @@ static inline void echo_start(struct echo_server *self, struct ev_loop *loop)
 
 static inline void echo_stop(struct echo_server *self, struct ev_loop *loop)
 {
-	struct eh_list *node = eh_list_next(&self->connections);
-	while (node != eh_list_head(&self->connections)) {
+	eh_list_foreach(&self->connections, node) {
 		struct echo_conn *conn = container_of(node, struct echo_conn, siblings);
 
 		warnf("%s: killing", conn->name);
 		echo_conn_close(conn);
-
-		node = eh_list_next(node);
 	}
 
 	eh_server_stop(&self->server, loop);
