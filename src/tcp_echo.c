@@ -10,7 +10,8 @@
 #include <eh_log.h>	/* debugf(), syserrf() */
 
 #include <assert.h>
-#include <stdlib.h>
+#include <stdlib.h>	/* malloc(), free() */
+#include <stddef.h>	/* offsetof */
 
 static ssize_t echo_on_conn_read(struct eh_connection *, unsigned char *, size_t);
 static void echo_on_conn_close(struct eh_connection *);
@@ -29,7 +30,7 @@ static struct eh_connection_cb echo_connection_callbacks = {
 /*
  * helpers
  */
-static struct echo_conn *echo_new(int fd)
+static struct echo_conn *echo_new(struct echo_server *server, int fd)
 {
 	struct echo_conn *self = malloc(sizeof(*self));
 	if (self) {
@@ -41,13 +42,23 @@ static struct echo_conn *echo_new(int fd)
 				   self->write_buffer, sizeof(self->write_buffer));
 
 		conn->cb = &echo_connection_callbacks;
+		eh_list_append(&server->connections, &self->siblings);
 	}
 	return self;
 }
 
 static inline void echo_free(struct echo_conn *self)
 {
+	eh_list_del(&self->siblings);
 	free(self);
+}
+
+static inline void echo_conn_close(struct echo_conn *self)
+{
+	struct eh_connection *conn = &self->conn;
+
+	eh_connection_stop(conn);
+	eh_connection_finish(conn);
 }
 
 /*
@@ -57,7 +68,7 @@ static void echo_on_conn_close(struct eh_connection *conn)
 {
 	struct echo_conn *self = (struct echo_conn *)conn;
 
-	debugf("%s: closed", self->name);
+	infof("%s: closed", self->name);
 	echo_free(self);
 }
 
@@ -98,18 +109,20 @@ static ssize_t echo_on_conn_read(struct eh_connection *conn, unsigned char *buff
  * eh_server callbacks
  */
 
-static struct eh_connection *echo_on_connect(struct eh_server *UNUSED(server), int fd,
+static struct eh_connection *echo_on_connect(struct eh_server *__server, int fd,
 					     struct sockaddr *sa, socklen_t sa_len)
 {
-	struct echo_conn *self = echo_new(fd);
+	struct echo_server *server = (struct echo_server *)__server;
+	struct echo_conn *self = echo_new(server, fd);
+
 	if (self == NULL) {
-		syserrf("echo_new(%d)", fd);
+		syserrf("echo_new(..., %d)", fd);
 	} else if (eh_socket_ntop(self->name, sizeof(self->name), sa, sa_len) < 0) {
 		syserr("eh_socket_ntop");
 		echo_free(self);
 	} else {
 		/* happy case */
-		debugf("%s: connected via fd %d", self->name, fd);
+		infof("%s: connected via fd %d", self->name, fd);
 
 		return &self->conn;
 	}
@@ -126,6 +139,7 @@ static int echo_init(struct echo_server *self, const char *addr, unsigned port)
 
 	memset(self, '\0', sizeof(*self));
 
+	/* socket */
 	switch (eh_server_ipv4_tcp(server, addr, port)) {
 	case -1:
 		syserrf("eh_server_ipv4_tcp(..., \"%s\", %u)", addr, port);
@@ -136,6 +150,10 @@ static int echo_init(struct echo_server *self, const char *addr, unsigned port)
 		return -1;
 	}
 
+	/* connections list */
+	eh_list_init(&self->connections);
+
+	/* callbacks */
 	server->on_connect = echo_on_connect;
 	/* server->on_stop = echo_on_server_stop */
 	/* server->on_error = echo_on_server_error; */
@@ -150,6 +168,16 @@ static inline void echo_start(struct echo_server *self, struct ev_loop *loop)
 
 static inline void echo_stop(struct echo_server *self, struct ev_loop *loop)
 {
+	struct eh_list *node = eh_list_next(&self->connections);
+	while (node != eh_list_head(&self->connections)) {
+		struct echo_conn *conn = container_of(node, struct echo_conn, siblings);
+
+		warnf("%s: killing", conn->name);
+		echo_conn_close(conn);
+
+		node = eh_list_next(node);
+	}
+
 	eh_server_stop(&self->server, loop);
 }
 
@@ -157,7 +185,7 @@ static void echo_signaled_stop(struct ev_loop *loop, struct ev_signal *w, int UN
 {
 	struct echo_server *self = w->data;
 
-	debugf("signal %d", w->signum);
+	warnf("signal %d", w->signum);
 
 	for (int i=0; i<2; i++)
 		eh_signal_stop(&sig[i], loop);
@@ -184,5 +212,6 @@ int main(int UNUSED(argc), char * UNUSED(argv[]))
 
 	echo_start(&server, loop);
 	ev_loop(loop, 0);
+
 	return 0;
 }
